@@ -50,6 +50,13 @@ source ~/.pyenv/nicebot/bin/activate
 
 Install Dependencies
 
+On a fresh or upgraded Ubuntu (Python 3.12+), the `secp256k1` dependency must compile from source. Install the build tools first, and make sure the system `libsecp256k1-dev` is **not** installed (newer versions dropped symbols this package needs; it will build its own bundled copy instead):
+
+```
+sudo apt remove -y libsecp256k1-dev
+sudo apt install -y pkg-config build-essential python3-dev libffi-dev autoconf automake libtool
+```
+
 ```sh
 python3 -m pip install -r requirements.txt
 ```
