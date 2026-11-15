@@ -8,6 +8,7 @@ import sys
 import time
 import libfiles as files
 import libnostr as nostr
+import libpublish as publish
 import libutils as utils
 
 def validateConfig():
@@ -54,10 +55,8 @@ def publishBotProfile():
     pubkey = profilePK.public_key.hex()
     kind0 = makeProfileFromDict(profile, pubkey)
     profilePK.sign_event(kind0)
-    nostr.connectToRelays()
-    nostr._relayManager.publish_event(kind0)
-    time.sleep(nostr._relayPublishTime)
-    nostr.disconnectRelays()
+    logger.info("Publishing bot profile")
+    publish.publishEvent(kind0, nostr.getNostrRelaysFromConfig(nostr.config), profilePK)
 
 BLOCKHEIGHT_REPORTED = "blockheightReported69"
 BLOCKHEIGHT_SEEN = "blockheightSeen"
@@ -84,6 +83,7 @@ if __name__ == '__main__':
     logger.addHandler(fileLoggingHandler)
     files.logger = logger
     nostr.logger = logger
+    publish.logger = logger
 
     # Load server config
     config = files.getConfig(CONFIG_FILE)
@@ -129,7 +129,7 @@ if __name__ == '__main__':
                 logger.debug(f"New Blockheight is {blockheightCurrent}")
 
                 # NEW BLOCK!
-                isconnected = False
+                relays = nostr.getNostrRelaysFromConfig(nostr.config)
 
                 # Process each block from already seen to the new block
                 for blockHeight in range(savedData[BLOCKHEIGHT_SEEN] + 1, blockheightCurrent + 1):
@@ -153,16 +153,11 @@ if __name__ == '__main__':
 
                         logger.info(f"Block {blockHeight} {matchtype} {matchvalue} success!")
 
-                        # Connect to relays if not yet connected
-                        if not isconnected:
-                            nostr.connectToRelays()
-                            isconnected = True
-
-                        # Prepare, sign, and publish message to nostr for this block
+                        # Prepare, sign, and publish message to nostr for this block,
+                        # waiting for each relay's OK so failures are visible in the log
                         event = Event(content=matchtext, kind=1, tags=[["blockheight",str(blockHeight)]])
                         nostr.getPrivateKey().sign_event(event)
-                        nostr._relayManager.publish_event(event)
-                        time.sleep(nostr._relayPublishTime)
+                        publish.publishEvent(event, relays, nostr.getPrivateKey())
 
                         # Make note of last reported and persist immediately, so a
                         # crash mid-catch-up never re-publishes this block
@@ -171,9 +166,6 @@ if __name__ == '__main__':
                         files.saveJsonFile(DATA_FILE, savedData)
 
                 logger.debug("Done checks")
-
-                # Disconnect if we connected
-                if isconnected: nostr.disconnectRelays()
 
                 # Update our last seen
                 savedData[BLOCKHEIGHT_SEEN] = blockheightCurrent
@@ -186,10 +178,6 @@ if __name__ == '__main__':
             # Relay/websocket hiccups must not kill the process; systemd's start
             # limit would otherwise give up after two quick crashes
             logger.warning(f"Error in main loop: {e}")
-            try:
-                nostr.disconnectRelays()
-            except Exception:
-                pass
 
         # Rest a bit
         logger.debug("Sleeping for 1 minute")
